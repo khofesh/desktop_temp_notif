@@ -51,11 +51,9 @@ elseif(WIN32)
         WINVER=0x0A00
     )
 
-    # Link WMI + WinRT + shell
+    # Link WinHTTP (sensor reader) + WinRT + shell (notifier)
     target_link_libraries(desktop_temp_notif PRIVATE
-        wbemuuid
-        ole32
-        oleaut32
+        winhttp
         runtimeobject
         shlwapi
     )

@@ -3,11 +3,13 @@
 
 class WindowsSensorReader : public SensorReader {
 public:
-    WindowsSensorReader();
-    ~WindowsSensorReader() override;
+    // host and port default to LibreHardwareMonitor's built-in web server
+    explicit WindowsSensorReader(const char* host = "localhost",
+                                 unsigned short port = 8085);
 
     std::map<std::string, float> read() override;
 
 private:
-    bool com_initialized_ = false;
+    std::string    host_;
+    unsigned short port_;
 };

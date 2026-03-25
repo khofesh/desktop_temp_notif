@@ -1,124 +1,232 @@
-// Windows sensor reader via WMI, querying LibreHardwareMonitor or
-// OpenHardwareMonitor. One of those applications must be running and have its
-// WMI provider active.
+// Windows sensor reader using LibreHardwareMonitor's built-in HTTP server.
 //
-// LibreHardwareMonitor: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-// OpenHardwareMonitor:  https://openhardwaremonitor.org/
+// Prerequisites:
+//   1. LibreHardwareMonitor running as Administrator.
+//   2. Options > Remote Web Server > Run  (exposes http://localhost:8085)
+//
+// The endpoint GET /data.json returns a recursive JSON tree of hardware nodes.
+// Temperature sensor nodes have a Value string like "45.0 °C".
 
 #include "windows_sensor_reader.hpp"
 
 #include <Windows.h>
-#include <comdef.h>
-#include <wbemidl.h>
+#include <winhttp.h>
 
 #include <iostream>
+#include <map>
 #include <string>
+#include <vector>
 
-#pragma comment(lib, "wbemuuid.lib")
-#pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "winhttp.lib")
 
+// ---------------------------------------------------------------------------
+// Minimal JSON parser — enough to traverse LHM's data.json tree.
+// ---------------------------------------------------------------------------
 namespace {
 
-// Convert a BSTR (wide string) to a UTF-8 std::string.
-std::string bstr_to_utf8(BSTR bstr) {
-    if (!bstr) return {};
-    int len = WideCharToMultiByte(CP_UTF8, 0, bstr, -1, nullptr, 0, nullptr, nullptr);
-    if (len <= 0) return {};
-    std::string result(static_cast<size_t>(len - 1), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, bstr, -1, result.data(), len, nullptr, nullptr);
-    return result;
+struct JVal {
+    enum Type { Null, Bool, Num, Str, Arr, Obj } type = Null;
+    bool        b{};
+    double      n{};
+    std::string s;
+    std::vector<JVal>                        arr;
+    std::vector<std::pair<std::string, JVal>> obj;
+
+    const JVal* get(const std::string& key) const {
+        for (auto& [k, v] : obj)
+            if (k == key) return &v;
+        return nullptr;
+    }
+};
+
+class JsonParser {
+    const char* p_;
+    const char* end_;
+
+    void skip_ws() {
+        while (p_ < end_ && (*p_ == ' ' || *p_ == '\t' ||
+                              *p_ == '\n' || *p_ == '\r'))
+            ++p_;
+    }
+
+    std::string parse_string() {
+        ++p_; // opening "
+        std::string r;
+        while (p_ < end_ && *p_ != '"') {
+            if (*p_ == '\\' && p_ + 1 < end_) {
+                ++p_;
+                switch (*p_) {
+                    case '"':  r += '"';  break;
+                    case '\\': r += '\\'; break;
+                    case '/':  r += '/';  break;
+                    case 'n':  r += '\n'; break;
+                    case 'r':  r += '\r'; break;
+                    case 't':  r += '\t'; break;
+                    default:   r += *p_;  break;
+                }
+            } else {
+                r += *p_;
+            }
+            ++p_;
+        }
+        if (p_ < end_) ++p_; // closing "
+        return r;
+    }
+
+    JVal parse_value() {
+        skip_ws();
+        if (p_ >= end_) return {};
+        JVal v;
+        char c = *p_;
+        if (c == '"') {
+            v.type = JVal::Str;
+            v.s    = parse_string();
+        } else if (c == '{') {
+            v.type = JVal::Obj;
+            ++p_;
+            skip_ws();
+            while (p_ < end_ && *p_ != '}') {
+                skip_ws();
+                if (*p_ != '"') { ++p_; continue; } // malformed, skip
+                std::string key = parse_string();
+                skip_ws();
+                if (p_ < end_ && *p_ == ':') ++p_;
+                v.obj.emplace_back(std::move(key), parse_value());
+                skip_ws();
+                if (p_ < end_ && *p_ == ',') ++p_;
+                skip_ws();
+            }
+            if (p_ < end_) ++p_; // '}'
+        } else if (c == '[') {
+            v.type = JVal::Arr;
+            ++p_;
+            skip_ws();
+            while (p_ < end_ && *p_ != ']') {
+                v.arr.push_back(parse_value());
+                skip_ws();
+                if (p_ < end_ && *p_ == ',') ++p_;
+                skip_ws();
+            }
+            if (p_ < end_) ++p_; // ']'
+        } else if (c == 't') { v.type = JVal::Bool; v.b = true;  p_ += 4; }
+          else if (c == 'f') { v.type = JVal::Bool; v.b = false; p_ += 5; }
+          else if (c == 'n') { p_ += 4; }
+          else {
+            v.type = JVal::Num;
+            char* ep{};
+            v.n = std::strtod(p_, &ep);
+            p_  = ep;
+        }
+        return v;
+    }
+
+public:
+    explicit JsonParser(const std::string& s)
+        : p_(s.data()), end_(s.data() + s.size()) {}
+    JVal parse() { return parse_value(); }
+};
+
+// Recursively collect all nodes whose Value field ends with "°C".
+void collect_temps(const JVal& node, std::map<std::string, float>& out) {
+    if (node.type != JVal::Obj) return;
+
+    const JVal* text_v  = node.get("Text");
+    const JVal* value_v = node.get("Value");
+
+    if (text_v  && text_v->type  == JVal::Str &&
+        value_v && value_v->type == JVal::Str) {
+        // LHM uses UTF-8 degree sign (0xC2 0xB0) followed by 'C'
+        const std::string degree_c = "\xc2\xb0""C";
+        if (value_v->s.find(degree_c) != std::string::npos) {
+            try {
+                // stof stops at the first non-numeric char ("45.0 °C" -> 45.0)
+                float temp = std::stof(value_v->s);
+                out[text_v->s] = temp;
+            } catch (...) {}
+        }
+    }
+
+    const JVal* children = node.get("Children");
+    if (children && children->type == JVal::Arr) {
+        for (const auto& child : children->arr)
+            collect_temps(child, out);
+    }
 }
 
-// Attempt to query temperature sensors from a given WMI hardware-monitor
-// namespace. Returns true if at least one reading was obtained.
-bool query_hwmon_namespace(const wchar_t* wmi_ns,
-                           std::map<std::string, float>& result) {
-    IWbemLocator* pLoc = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_WbemLocator, nullptr,
-                                  CLSCTX_INPROC_SERVER, IID_IWbemLocator,
-                                  reinterpret_cast<LPVOID*>(&pLoc));
-    if (FAILED(hr)) return false;
+// HTTP GET via WinHTTP. Returns response body, or empty string on failure.
+std::string winhttp_get(const std::wstring& host, INTERNET_PORT port,
+                        const wchar_t* path) {
+    HINTERNET hSession = WinHttpOpen(
+        L"desktop_temp_notif/1.0",
+        WINHTTP_ACCESS_TYPE_NO_PROXY,
+        WINHTTP_NO_PROXY_NAME,
+        WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return {};
 
-    IWbemServices* pSvc = nullptr;
-    hr = pLoc->ConnectServer(_bstr_t(wmi_ns), nullptr, nullptr, 0,
-                              WBEM_FLAG_CONNECT_USE_MAX_WAIT, nullptr, 0, &pSvc);
-    pLoc->Release();
-    if (FAILED(hr)) return false;
+    HINTERNET hConn = WinHttpConnect(hSession, host.c_str(), port, 0);
+    if (!hConn) { WinHttpCloseHandle(hSession); return {}; }
 
-    CoSetProxyBlanket(pSvc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr,
-                      RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
-                      nullptr, EOAC_NONE);
-
-    IEnumWbemClassObject* pEnum = nullptr;
-    hr = pSvc->ExecQuery(
-        _bstr_t("WQL"),
-        _bstr_t("SELECT Name, Value FROM Sensor WHERE SensorType='Temperature'"),
-        WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-        nullptr, &pEnum);
-    if (FAILED(hr)) {
-        pSvc->Release();
-        return false;
+    HINTERNET hReq = WinHttpOpenRequest(
+        hConn, L"GET", path,
+        nullptr, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, 0); // no HTTPS flag — plain HTTP
+    if (!hReq) {
+        WinHttpCloseHandle(hConn);
+        WinHttpCloseHandle(hSession);
+        return {};
     }
 
-    IWbemClassObject* pObj = nullptr;
-    ULONG fetched = 0;
-    while (pEnum->Next(WBEM_INFINITE, 1, &pObj, &fetched) == S_OK) {
-        VARIANT vName, vValue;
-        VariantInit(&vName);
-        VariantInit(&vValue);
+    bool ok = WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                  WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+              WinHttpReceiveResponse(hReq, nullptr);
 
-        bool ok_name  = SUCCEEDED(pObj->Get(L"Name",  0, &vName,  nullptr, nullptr));
-        bool ok_value = SUCCEEDED(pObj->Get(L"Value", 0, &vValue, nullptr, nullptr));
-
-        if (ok_name && ok_value &&
-            vName.vt == VT_BSTR &&
-            (vValue.vt == VT_R4 || vValue.vt == VT_R8)) {
-            std::string name = bstr_to_utf8(vName.bstrVal);
-            float temp = (vValue.vt == VT_R4)
-                             ? vValue.fltVal
-                             : static_cast<float>(vValue.dblVal);
-            result[name] = temp;
+    std::string body;
+    if (ok) {
+        DWORD avail = 0;
+        while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
+            std::string buf(avail, '\0');
+            DWORD read = 0;
+            WinHttpReadData(hReq, buf.data(), avail, &read);
+            body.append(buf.data(), read);
         }
-
-        VariantClear(&vName);
-        VariantClear(&vValue);
-        pObj->Release();
     }
 
-    pEnum->Release();
-    pSvc->Release();
-    return !result.empty();
+    WinHttpCloseHandle(hReq);
+    WinHttpCloseHandle(hConn);
+    WinHttpCloseHandle(hSession);
+    return body;
+}
+
+// Narrow UTF-8 -> wide string for WinHTTP host parameter.
+std::wstring to_wide(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring r(n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, r.data(), n);
+    return r;
 }
 
 } // namespace
 
-WindowsSensorReader::WindowsSensorReader() {
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    com_initialized_ = SUCCEEDED(hr) || hr == S_FALSE; // S_FALSE = already initialised
+// ---------------------------------------------------------------------------
 
-    // Set default COM security. Ignored if already set by the process.
-    CoInitializeSecurity(nullptr, -1, nullptr, nullptr,
-                         RPC_C_AUTHN_LEVEL_DEFAULT,
-                         RPC_C_IMP_LEVEL_IMPERSONATE,
-                         nullptr, EOAC_NONE, nullptr);
-}
-
-WindowsSensorReader::~WindowsSensorReader() {
-    if (com_initialized_) CoUninitialize();
-}
+WindowsSensorReader::WindowsSensorReader(const char* host, unsigned short port)
+    : host_(host), port_(port) {}
 
 std::map<std::string, float> WindowsSensorReader::read() {
     std::map<std::string, float> result;
 
-    // Try LibreHardwareMonitor first, then OpenHardwareMonitor
-    if (!query_hwmon_namespace(L"ROOT\\LibreHardwareMonitor", result)) {
-        if (!query_hwmon_namespace(L"ROOT\\OpenHardwareMonitor", result)) {
-            std::cerr << "Warning: no hardware monitor WMI namespace found.\n"
-                         "  Start LibreHardwareMonitor or OpenHardwareMonitor "
-                         "with 'Enable WMI' enabled.\n";
-        }
+    std::string body = winhttp_get(to_wide(host_), port_, L"/data.json");
+    if (body.empty()) {
+        std::cerr << "Warning: could not reach LibreHardwareMonitor at "
+                  << host_ << ":" << port_ << "/data.json\n"
+                  << "  Ensure LHM is running as Administrator and\n"
+                  << "  Options > Remote Web Server > Run is enabled.\n";
+        return result;
     }
 
+    JsonParser parser(body);
+    JVal root = parser.parse();
+    collect_temps(root, result);
     return result;
 }

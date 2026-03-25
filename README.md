@@ -34,7 +34,15 @@ A running desktop session with a notification daemon is required (GNOME, KDE, XF
 
 ### Windows
 
-Install and run [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) or [OpenHardwareMonitor](https://openhardwaremonitor.org/) with **Options > Enable WMI** turned on. The app queries their WMI namespace for temperature data.
+Install [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor).
+
+This app reads sensor data from LibreHardwareMonitor's built-in HTTP server (not WMI, which is unreliable in recent versions).
+
+Setup:
+1. **Run LibreHardwareMonitor as Administrator** (right-click → _Run as administrator_). Required for low-level hardware access.
+2. In LHM: **Options → Remote Web Server → Run** — this starts an HTTP server at `http://localhost:8085`.
+3. Verify it works by opening `http://localhost:8085/data.json` in a browser — you should see all sensor readings as JSON.
+4. Keep LibreHardwareMonitor running in the background while `desktop_temp_notif.exe` is active.
 
 ---
 

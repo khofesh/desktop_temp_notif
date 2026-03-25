@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-Monitor hardware temperatures via the `sensors` command (lm-sensors), linux libraries or linux environment and send desktop notifications when temperatures exceed configurable thresholds. Runs as a background process. Target platforms: Linux and Windows.
+Monitor hardware temperatures and send desktop notifications when temperatures exceed configurable thresholds. Runs as a background process. Target platforms: Linux and Windows.
 
 ## Tech Stack
 
-- **Language**: C++
-- **Build system**: CMake
-- **Linux notifications**: libnotify (via `notify-send`) or `libnotify` C API
-- **Windows notifications**: Windows Toast Notifications (WinRT API) or a library such as WinToast
-- **Linux sensor reading**: parse stdout of `sensors` (lm-sensors package)
-- **Windows sensor reading**: OpenHardwareMonitor/LibreHardwareMonitor COM/WMI interface or equivalent
+- **Language**: C++17
+- **Build system**: CMake 3.16+
+- **Linux notifications**: `libnotify` C API (preferred) with `notify-send` fork/exec fallback
+- **Windows notifications**: Windows Toast Notifications (WinRT) via `DesktopNotificationManagerCompat`
+- **Linux sensor reading**: Parse stdout of `sensors` (lm-sensors package) with regex
+- **Windows sensor reading**: LibreHardwareMonitor HTTP API (`http://localhost:8085/data.json`) via WinHTTP
 
 ## Build
 
@@ -27,53 +27,107 @@ cmake -B build -G "Visual Studio 17 2022"
 cmake --build build --config Release
 ```
 
-## Project Structure (planned)
+### Linux Build Notes
+
+- Detects `libnotify` via PkgConfig; compiles with `-DUSE_LIBNOTIFY` if found, otherwise falls back to `notify-send`
+- Requires `lm-sensors` package installed and `sensors` binary in PATH
+
+### Windows Build Notes
+
+- Requires LibreHardwareMonitor running as Administrator with web server enabled on port 8085
+- Defines: `UNICODE`, `_UNICODE`, `_WIN32_WINNT=0x0A00` (Windows 10/11)
+- Links: `winhttp`, `runtimeobject`, `ole32`, `shlwapi`
+
+## Project Structure
 
 ```
 desktop_temp_notif/
 ├── CMakeLists.txt
+├── sensors_data.md                        # reference lm-sensors output
+├── config.linux.conf                      # sample Linux config
+├── config.windows.conf                    # sample Windows config
+├── config.local.conf                      # local testing config (thresholds at 30°C)
+├── data.json                              # sample LibreHardwareMonitor JSON
 ├── src/
-│   ├── main.cpp
-│   ├── sensor_reader.hpp / .cpp   # platform-abstracted sensor reading
-│   ├── notifier.hpp / .cpp        # platform-abstracted desktop notification
-│   └── config.hpp / .cpp          # threshold configuration
-├── platform/
-│   ├── linux/
-│   │   ├── linux_sensor_reader.cpp
-│   │   └── linux_notifier.cpp
-│   └── windows/
-│       ├── windows_sensor_reader.cpp
-│       └── windows_notifier.cpp
-└── sensors_data.md                # reference sensors output
+│   ├── main.cpp                           # entry point, polling loop, CLI args
+│   ├── sensor_reader.hpp                  # abstract base: SensorReader
+│   ├── notifier.hpp                       # abstract base: Notifier, NotificationLevel
+│   ├── config.hpp                         # Config / Threshold structs
+│   └── config.cpp                         # config loading (file + defaults)
+└── platform/
+    ├── linux/
+    │   ├── linux_sensor_reader.hpp/.cpp   # pipes `sensors`, regex parsing
+    │   └── linux_notifier.hpp/.cpp        # libnotify or notify-send fallback
+    └── windows/
+        ├── windows_sensor_reader.hpp/.cpp # WinHTTP + custom JSON parser
+        ├── windows_notifier.hpp/.cpp      # WinRT toast notifications
+        ├── notification_activator.hpp     # COM activation callback (WRL)
+        ├── DesktopNotificationManagerCompat.h/.cpp  # MS compat layer (MIT)
 ```
 
-## Sensor Data
+## Architecture
 
-The `sensors_data.md` file contains a reference example of `sensors` output for this machine. Key temperature sources:
+- `SensorReader` and `Notifier` are abstract base classes; platform implementations live under `platform/`
+- `main.cpp` owns the polling loop: reads sensors, compares against thresholds, sends notifications
+- Notification cooldown (default 300 s) suppresses repeated alerts per sensor; escalation (Warning → Critical) overrides cooldown
 
-- **nct6798** (ISA adapter): motherboard sensors — `SYSTIN`, `CPUTIN`, `AUXTIN*`, `SMBUSMASTER 0`
-- **k10temp** (PCI adapter): AMD CPU die temps — `Tctl`, `Tccd1`, `Tccd2`
-- **r8169** (MDIO adapter): network adapter — `temp1`
+## Configuration File Format
 
-On Linux, sensor data is read by running `sensors` (from the `lm-sensors` package) and parsing its stdout. On Windows, an equivalent hardware monitoring library/tool will be needed.
+```ini
+poll_interval=30               # seconds between sensor reads
+notification_cooldown=300      # seconds before re-notifying same sensor
+
+# Per-sensor thresholds
+SYSTIN.warning=70
+SYSTIN.critical=80
+SMBUSMASTER 0.warning=75
+SMBUSMASTER 0.critical=80
+```
+
+Pass the config file path as the first CLI argument, or omit for built-in defaults.
+Verbose mode: `--verbose` (first arg) prints all readings and skip reasons.
 
 ## Default Thresholds
 
-Based on the sensor data in `sensors_data.md` and typical hardware limits:
+### Linux (lm-sensors)
 
 | Sensor        | Warning (°C) | Critical (°C) |
 |---------------|-------------|---------------|
 | SYSTIN        | 70          | 80            |
 | CPUTIN        | 75          | 80            |
 | SMBUSMASTER 0 | 75          | 80            |
-| Tctl (k10temp)| 85          | 95            |
-| Tccd1/Tccd2   | 85          | 95            |
-| r8169 temp1   | 100         | 115           |
+| Tctl          | 85          | 95            |
+| Tccd1         | 85          | 95            |
+| Tccd2         | 85          | 95            |
+| temp1         | 100         | 115           |
 
-Thresholds should be user-configurable (e.g., via a config file or CLI flags).
+### Windows (LibreHardwareMonitor)
+
+| Sensor           | Warning (°C) | Critical (°C) |
+|------------------|-------------|---------------|
+| Core (Tctl/Tdie) | 85          | 95            |
+| DIMM #1          | 50          | 80            |
+| GPU VR SoC       | 80          | 100           |
+| Temperature      | 60          | 79            |
+
+## Sensor Data
+
+`sensors_data.md` contains reference lm-sensors output for this machine:
+
+- **nct6798** (ISA adapter): `SYSTIN`, `CPUTIN`, `AUXTIN*`, `SMBUSMASTER 0`
+- **k10temp** (PCI adapter): `Tctl`, `Tccd1`, `Tccd2`
+- **r8169** (MDIO adapter): `temp1`
+
+`data.json` contains a reference LibreHardwareMonitor JSON response.
 
 ## Skills and learning
 
 - always use C/C++ and cmake skill when developing in this repo.
 
+## Plan mode default
+
+- use plan mode for verification steps, not just building.
+- always asking questions to get more clarity
+- write detailed specs upfront to reduce ambiguity
+- always breakdown tasks with its dependencies
 

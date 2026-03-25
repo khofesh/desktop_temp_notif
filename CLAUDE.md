@@ -71,3 +71,9 @@ Based on the sensor data in `sensors_data.md` and typical hardware limits:
 | r8169 temp1   | 100         | 115           |
 
 Thresholds should be user-configurable (e.g., via a config file or CLI flags).
+
+## Skills and learning
+
+- always use C/C++ and cmake skill when developing in this repo.
+
+

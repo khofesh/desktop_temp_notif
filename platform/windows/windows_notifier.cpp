@@ -1,9 +1,10 @@
 // Windows desktop notifications via WinRT Toast API (Windows 10/11).
 // Falls back to a MessageBox if the WinRT path fails.
 //
-// For an unpackaged Win32 app the process must have an explicit AppUserModelID
-// registered in the registry (done in the constructor) so the notification
-// centre can refer back to it.
+// WinRT toasts in unpackaged Win32 apps require:
+//   1. A Start Menu shortcut (.lnk) with the AppUserModelID embedded.
+//   2. SetCurrentProcessExplicitAppUserModelID() called at startup.
+// The constructor handles both automatically.
 
 #include "windows_notifier.hpp"
 
@@ -15,9 +16,12 @@
 #include <windows.ui.notifications.h>
 #include <windows.data.xml.dom.h>
 
+#include <objbase.h>
 #include <roapi.h>
-#include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
+#include <propkey.h>
+#include <propvarutil.h>
 
 #include <iomanip>
 #include <iostream>
@@ -26,45 +30,61 @@
 
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "propsys.lib")
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
 using namespace ABI::Windows::UI::Notifications;
 using namespace ABI::Windows::Data::Xml::Dom;
 
-// Application User Model ID — must be registered in the registry once.
-static constexpr wchar_t kAppId[] = L"Khofesh.DesktopTempNotif";
+static constexpr wchar_t kAppId[]       = L"Khofesh.DesktopTempNotif";
+static constexpr wchar_t kShortcutName[] = L"Desktop Temperature Monitor.lnk";
 
 namespace {
 
-// Register the AppUserModelID in HKCU so the toast system can find the app.
-void register_app_id() {
-    // Path: HKCU\SOFTWARE\Classes\AppUserModelId\<kAppId>
-    std::wstring key_path =
-        std::wstring(L"SOFTWARE\\Classes\\AppUserModelId\\") + kAppId;
-    HKEY hKey = nullptr;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, key_path.c_str(), 0, nullptr,
-                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr,
-                        &hKey, nullptr) == ERROR_SUCCESS) {
-        const wchar_t* display_name = L"Desktop Temperature Monitor";
-        RegSetValueExW(hKey, L"DisplayName", 0, REG_SZ,
-                       reinterpret_cast<const BYTE*>(display_name),
-                       static_cast<DWORD>((wcslen(display_name) + 1) * sizeof(wchar_t)));
-        RegCloseKey(hKey);
+// Create a Start Menu shortcut with the AUMID embedded via IPropertyStore.
+// WinRT toasts are silently dropped without this shortcut.
+void ensure_start_menu_shortcut() {
+    wchar_t programs_path[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROGRAMS, nullptr, 0, programs_path)))
+        return;
+
+    std::wstring lnk = std::wstring(programs_path) + L"\\" + kShortcutName;
+
+    // Skip if it already exists
+    if (GetFileAttributesW(lnk.c_str()) != INVALID_FILE_ATTRIBUTES) return;
+
+    wchar_t exe_path[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+
+    ComPtr<IShellLinkW> shell_link;
+    if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                 IID_PPV_ARGS(&shell_link))))
+        return;
+
+    shell_link->SetPath(exe_path);
+    shell_link->SetDescription(L"Desktop Temperature Monitor");
+
+    // Embed AUMID in the shortcut's property store
+    ComPtr<IPropertyStore> prop_store;
+    if (SUCCEEDED(shell_link.As(&prop_store))) {
+        PROPVARIANT pv;
+        if (SUCCEEDED(InitPropVariantFromString(kAppId, &pv))) {
+            prop_store->SetValue(PKEY_AppUserModel_ID, pv);
+            PropVariantClear(&pv);
+            prop_store->Commit();
+        }
     }
+
+    // Save the .lnk file
+    ComPtr<IPersistFile> persist;
+    if (SUCCEEDED(shell_link.As(&persist)))
+        persist->Save(lnk.c_str(), TRUE);
 }
 
-// Build the toast XML string.
-// <toast>
-//   <visual>
-//     <binding template="ToastGeneric">
-//       <text>Title</text>
-//       <text>Body</text>
-//     </binding>
-//   </visual>
-// </toast>
+// Build the toast XML payload.
 std::wstring build_toast_xml(const std::wstring& title, const std::wstring& body) {
-    // Escape XML special characters in user-visible strings.
     auto xml_escape = [](const std::wstring& s) {
         std::wstring out;
         out.reserve(s.size());
@@ -91,18 +111,15 @@ std::wstring build_toast_xml(const std::wstring& title, const std::wstring& body
     return ss.str();
 }
 
-// Show toast via WinRT API. Returns true on success.
+// Show toast via WinRT. Returns true on success.
 bool show_toast_winrt(const std::wstring& title, const std::wstring& body) {
-    // --- Get IToastNotificationManagerStatics ---
     ComPtr<IToastNotificationManagerStatics> mgr;
     HRESULT hr = RoGetActivationFactory(
         HStringReference(
-            RuntimeClass_Windows_UI_Notifications_ToastNotificationManager)
-            .Get(),
+            RuntimeClass_Windows_UI_Notifications_ToastNotificationManager).Get(),
         IID_PPV_ARGS(&mgr));
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { std::cerr << "ToastNotificationManager unavailable (0x" << std::hex << hr << ")\n"; return false; }
 
-    // --- Load XML into an IXmlDocument ---
     ComPtr<IXmlDocument> xml_doc;
     hr = RoActivateInstance(
         HStringReference(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument).Get(),
@@ -110,37 +127,30 @@ bool show_toast_winrt(const std::wstring& title, const std::wstring& body) {
     if (FAILED(hr)) return false;
 
     ComPtr<IXmlDocumentIO> xml_io;
-    hr = xml_doc.As(&xml_io);
-    if (FAILED(hr)) return false;
+    if (FAILED(xml_doc.As(&xml_io))) return false;
 
     std::wstring xml_str = build_toast_xml(title, body);
-    hr = xml_io->LoadXml(HStringReference(xml_str.c_str()).Get());
-    if (FAILED(hr)) return false;
+    if (FAILED(xml_io->LoadXml(HStringReference(xml_str.c_str()).Get()))) return false;
 
-    // --- Create IToastNotification ---
     ComPtr<IToastNotificationFactory> factory;
     hr = RoGetActivationFactory(
         HStringReference(
-            RuntimeClass_Windows_UI_Notifications_ToastNotification)
-            .Get(),
+            RuntimeClass_Windows_UI_Notifications_ToastNotification).Get(),
         IID_PPV_ARGS(&factory));
     if (FAILED(hr)) return false;
 
     ComPtr<IToastNotification> toast;
-    hr = factory->CreateToastNotification(xml_doc.Get(), &toast);
-    if (FAILED(hr)) return false;
+    if (FAILED(factory->CreateToastNotification(xml_doc.Get(), &toast))) return false;
 
-    // --- Get IToastNotifier for our AppUserModelID ---
     ComPtr<IToastNotifier> notifier;
-    hr = mgr->CreateToastNotifierWithId(HStringReference(kAppId).Get(),
-                                         &notifier);
-    if (FAILED(hr)) return false;
+    hr = mgr->CreateToastNotifierWithId(HStringReference(kAppId).Get(), &notifier);
+    if (FAILED(hr)) { std::cerr << "CreateToastNotifierWithId failed (0x" << std::hex << hr << ")\n"; return false; }
 
     hr = notifier->Show(toast.Get());
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) { std::cerr << "Toast Show failed (0x" << std::hex << hr << ")\n"; return false; }
+    return true;
 }
 
-// Simple MessageBox fallback when WinRT is unavailable.
 void show_messagebox_fallback(const std::wstring& title, const std::wstring& body,
                               NotificationLevel level) {
     UINT type = MB_OK | MB_SYSTEMMODAL |
@@ -155,7 +165,7 @@ WindowsNotifier::WindowsNotifier() {
     winrt_initialized_ = SUCCEEDED(hr) || hr == S_FALSE;
 
     SetCurrentProcessExplicitAppUserModelID(kAppId);
-    register_app_id();
+    ensure_start_menu_shortcut();
 }
 
 WindowsNotifier::~WindowsNotifier() {
@@ -167,7 +177,6 @@ void WindowsNotifier::send(const std::string& sensor, float temp, float threshol
     const wchar_t* level_wstr =
         (level == NotificationLevel::Critical) ? L"CRITICAL" : L"WARNING";
 
-    // sensor name: narrow UTF-8 -> wide
     int wlen = MultiByteToWideChar(CP_UTF8, 0, sensor.c_str(), -1, nullptr, 0);
     std::wstring wsensor(static_cast<size_t>(wlen > 0 ? wlen - 1 : 0), L'\0');
     if (wlen > 0)

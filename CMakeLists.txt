@@ -51,10 +51,12 @@ elseif(WIN32)
         WINVER=0x0A00
     )
 
-    # Link WinHTTP (sensor reader) + WinRT + shell (notifier)
+    # Link WinHTTP (sensor reader) + WinRT + shell + shortcut (notifier)
     target_link_libraries(desktop_temp_notif PRIVATE
         winhttp
         runtimeobject
         shlwapi
+        ole32
+        propsys
     )
 endif()

@@ -17,13 +17,23 @@
 #include <memory>
 #include <thread>
 
+static bool verbose = false;
+
 int main(int argc, char* argv[]) {
+    // Usage: desktop_temp_notif [--verbose] [config_file]
     Config cfg;
-    if (argc > 1) {
-        cfg = Config::load(argv[1]);
-    } else {
-        cfg = Config::default_config();
+    std::string config_path;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--verbose" || arg == "-v") {
+            verbose = true;
+        } else {
+            config_path = arg;
+        }
     }
+
+    cfg = config_path.empty() ? Config::default_config() : Config::load(config_path);
 
 #ifdef __linux__
     std::unique_ptr<SensorReader> reader = std::make_unique<LinuxSensorReader>();
@@ -50,9 +60,19 @@ int main(int argc, char* argv[]) {
         auto readings = reader->read();
         std::time_t now = std::time(nullptr);
 
+        if (verbose) {
+            std::cout << "\n--- sensor readings (" << readings.size() << ") ---\n";
+            for (auto& [s, t] : readings)
+                std::cout << "  " << s << ": " << t << " C\n";
+        }
+
         for (auto& [sensor, temp] : readings) {
             auto thresh_it = cfg.thresholds.find(sensor);
-            if (thresh_it == cfg.thresholds.end()) continue;
+            if (thresh_it == cfg.thresholds.end()) {
+                if (verbose)
+                    std::cout << "  [skip] " << sensor << " — not in config\n";
+                continue;
+            }
 
             const Threshold& thresh = thresh_it->second;
             bool should_notify = false;
@@ -83,6 +103,10 @@ int main(int argc, char* argv[]) {
             float threshold_val = (level == NotificationLevel::Critical)
                                       ? thresh.critical
                                       : thresh.warning;
+            const char* level_str = (level == NotificationLevel::Critical)
+                                        ? "CRITICAL" : "WARNING";
+            std::cout << "[" << level_str << "] " << sensor
+                      << " " << temp << " C (threshold: " << threshold_val << " C)\n";
             notifier->send(sensor, temp, threshold_val, level);
             last_notif[sensor] = {level, now};
         }

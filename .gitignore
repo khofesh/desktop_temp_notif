@@ -33,3 +33,6 @@ desktop_temp_notif
 
 # macOS
 .DS_Store
+
+# LHM sample data (local only)
+data.json

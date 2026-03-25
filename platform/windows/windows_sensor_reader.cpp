@@ -126,7 +126,7 @@ public:
     JVal parse() { return parse_value(); }
 };
 
-// Recursively collect all nodes whose Value field ends with "°C".
+// Recursively collect all nodes whose Value field contains "°C".
 void collect_temps(const JVal& node, std::map<std::string, float>& out) {
     if (node.type != JVal::Obj) return;
 
@@ -139,8 +139,12 @@ void collect_temps(const JVal& node, std::map<std::string, float>& out) {
         const std::string degree_c = "\xc2\xb0""C";
         if (value_v->s.find(degree_c) != std::string::npos) {
             try {
-                // stof stops at the first non-numeric char ("45.0 °C" -> 45.0)
-                float temp = std::stof(value_v->s);
+                // LHM may use a comma as decimal separator depending on the
+                // system locale (e.g. "41,8 °C"). Normalise to period first.
+                std::string num_str = value_v->s;
+                for (char& c : num_str)
+                    if (c == ',') c = '.';
+                float temp = std::stof(num_str);
                 out[text_v->s] = temp;
             } catch (...) {}
         }

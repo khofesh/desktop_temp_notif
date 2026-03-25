@@ -157,7 +157,7 @@ void collect_temps(const JVal& node, std::map<std::string, float>& out) {
     }
 }
 
-// HTTP GET via WinHTTP. Returns response body, or empty string on failure.
+// HTTP GET via WinHTTP. Prints detailed errors to stderr. Returns body or "".
 std::string winhttp_get(const std::wstring& host, INTERNET_PORT port,
                         const wchar_t* path) {
     HINTERNET hSession = WinHttpOpen(
@@ -165,34 +165,62 @@ std::string winhttp_get(const std::wstring& host, INTERNET_PORT port,
         WINHTTP_ACCESS_TYPE_NO_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hSession) return {};
+    if (!hSession) {
+        std::cerr << "WinHttpOpen failed: " << GetLastError() << "\n";
+        return {};
+    }
 
     HINTERNET hConn = WinHttpConnect(hSession, host.c_str(), port, 0);
-    if (!hConn) { WinHttpCloseHandle(hSession); return {}; }
+    if (!hConn) {
+        std::cerr << "WinHttpConnect failed: " << GetLastError()
+                  << " (is LHM web server running?)\n";
+        WinHttpCloseHandle(hSession);
+        return {};
+    }
 
     HINTERNET hReq = WinHttpOpenRequest(
         hConn, L"GET", path,
         nullptr, WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES, 0); // no HTTPS flag — plain HTTP
+        WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
     if (!hReq) {
+        std::cerr << "WinHttpOpenRequest failed: " << GetLastError() << "\n";
         WinHttpCloseHandle(hConn);
         WinHttpCloseHandle(hSession);
         return {};
     }
 
-    bool ok = WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                  WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-              WinHttpReceiveResponse(hReq, nullptr);
+    if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+        std::cerr << "WinHttpSendRequest failed: " << GetLastError() << "\n";
+        WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSession);
+        return {};
+    }
+
+    if (!WinHttpReceiveResponse(hReq, nullptr)) {
+        std::cerr << "WinHttpReceiveResponse failed: " << GetLastError() << "\n";
+        WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSession);
+        return {};
+    }
+
+    // Check HTTP status code
+    DWORD status = 0, statusSize = sizeof(status);
+    WinHttpQueryHeaders(hReq,
+        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize,
+        WINHTTP_NO_HEADER_INDEX);
+    if (status != 200) {
+        std::cerr << "LHM HTTP server returned status " << status << "\n";
+        WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSession);
+        return {};
+    }
 
     std::string body;
-    if (ok) {
-        DWORD avail = 0;
-        while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
-            std::string buf(avail, '\0');
-            DWORD read = 0;
-            WinHttpReadData(hReq, buf.data(), avail, &read);
-            body.append(buf.data(), read);
-        }
+    DWORD avail = 0;
+    while (WinHttpQueryDataAvailable(hReq, &avail) && avail > 0) {
+        std::string buf(avail, '\0');
+        DWORD read = 0;
+        WinHttpReadData(hReq, buf.data(), avail, &read);
+        body.append(buf.data(), read);
     }
 
     WinHttpCloseHandle(hReq);
@@ -220,17 +248,24 @@ WindowsSensorReader::WindowsSensorReader(const char* host, unsigned short port)
 std::map<std::string, float> WindowsSensorReader::read() {
     std::map<std::string, float> result;
 
+    std::cerr << "Fetching http://" << host_ << ":" << port_ << "/data.json ...\n";
     std::string body = winhttp_get(to_wide(host_), port_, L"/data.json");
     if (body.empty()) {
-        std::cerr << "Warning: could not reach LibreHardwareMonitor at "
-                  << host_ << ":" << port_ << "/data.json\n"
-                  << "  Ensure LHM is running as Administrator and\n"
-                  << "  Options > Remote Web Server > Run is enabled.\n";
+        std::cerr << "  ERROR: empty response — ensure LHM is running as Administrator\n"
+                  << "  and Options > Remote Web Server > Run is enabled.\n"
+                  << "  Verify manually: http://" << host_ << ":" << port_ << "/data.json\n";
         return result;
     }
+
+    std::cerr << "  OK: received " << body.size() << " bytes\n";
 
     JsonParser parser(body);
     JVal root = parser.parse();
     collect_temps(root, result);
+
+    if (result.empty())
+        std::cerr << "  WARNING: JSON parsed but no temperature sensors found.\n"
+                  << "  Check that LHM is detecting hardware sensors.\n";
+
     return result;
 }

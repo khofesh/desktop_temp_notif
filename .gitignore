@@ -1,0 +1,35 @@
+# Build directories
+build/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+install_manifest.txt
+compile_commands.json
+
+# Compiled binaries
+desktop_temp_notif
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# IDE / editor
+.vscode/
+.idea/
+*.user
+*.suo
+*.sdf
+*.opensdf
+.vs/
+
+# clangd
+.cache/
+
+# macOS
+.DS_Store

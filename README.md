@@ -10,4 +10,5 @@ tech stack:
 - C++
 - cmake
 - notification on linux and windows
+- running on the background
 

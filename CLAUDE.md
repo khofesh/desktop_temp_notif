@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Goal
 
-Monitor hardware temperatures via the `sensors` command (lm-sensors), linux libraries or linux environment and send desktop notifications when temperatures exceed configurable thresholds. Target platforms: Linux and Windows.
+Monitor hardware temperatures via the `sensors` command (lm-sensors), linux libraries or linux environment and send desktop notifications when temperatures exceed configurable thresholds. Runs as a background process. Target platforms: Linux and Windows.
 
 ## Tech Stack
 

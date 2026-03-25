@@ -141,6 +141,8 @@ temp1.critical=115
 
 ### Default thresholds
 
+**Linux** (lm-sensors names):
+
 | Sensor        | Warning (°C) | Critical (°C) |
 |---------------|-------------|---------------|
 | SYSTIN        | 70          | 80            |
@@ -150,3 +152,14 @@ temp1.critical=115
 | Tccd1         | 85          | 95            |
 | Tccd2         | 85          | 95            |
 | temp1         | 100         | 115           |
+
+**Windows** (LibreHardwareMonitor names):
+
+| Sensor                | Warning (°C) | Critical (°C) |
+|-----------------------|-------------|---------------|
+| Core (Tctl/Tdie)      | 85          | 95            |
+| DIMM #1               | 50          | 80            |
+| GPU VR SoC            | 80          | 100           |
+| Composite Temperature | 60          | 79            |
+| Temperature #1        | 60          | 79            |
+| Temperature #2        | 60          | 79            |

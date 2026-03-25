@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15",
+                "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/x86_64-redhat-linux",
+                "/usr/lib/gcc/x86_64-redhat-linux/15/../../../../include/c++/15/backward",
+                "/usr/lib/gcc/x86_64-redhat-linux/15/include",
+                "/usr/local/include",
+                "/usr/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
+        }
+    ],
+    "version": 4
+}

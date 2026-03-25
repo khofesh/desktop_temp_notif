@@ -20,7 +20,7 @@ desktop_temp_notif
 *.exe
 
 # IDE / editor
-.vscode/
+# .vscode/
 .idea/
 *.user
 *.suo

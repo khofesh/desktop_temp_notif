@@ -1,0 +1,31 @@
+{
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureArgs": ["-DCMAKE_BUILD_TYPE=Debug"],
+  "cmake.buildArgs": ["--parallel"],
+  "cmake.debugConfig": {
+    "MIMode": "gdb",
+    "miDebuggerPath": "/usr/bin/gdb"
+  },
+  "cmake.defaultVariants": {
+    "buildType": {
+      "default": "debug",
+      "description": "The build type to use"
+    }
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+  "C_Cpp.errorSquiggles": "enabled",
+  "C_Cpp.intelliSenseEngine": "default",
+  "C_Cpp.autocomplete": "default",
+  "C_Cpp.loggingLevel": "Information",
+  "cmake.configureSettings": {
+    "VCPKG_ROOT": "${env:VCPKG_ROOT}"
+  },
+  "files.associations": {
+    "*.yaml": "yaml",
+    "*.html": "html",
+    "*.css": "css",
+    "stdexcept": "cpp",
+    "msp430.h": "c"
+  }
+}

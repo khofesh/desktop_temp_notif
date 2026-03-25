@@ -34,29 +34,24 @@ elseif(WIN32)
         src/config.cpp
         platform/windows/windows_sensor_reader.cpp
         platform/windows/windows_notifier.cpp
+        platform/windows/DesktopNotificationManagerCompat.cpp
     )
 
     add_executable(desktop_temp_notif ${SOURCES})
     target_include_directories(desktop_temp_notif PRIVATE src platform/windows)
 
-    # WinRT headers live under <SDK>/Include/<version>/winrt/
-    # CMake's find_package(WindowsSDK) can locate this, but a robust fallback
-    # is to let the compiler find them via the VS-injected include paths.
-    # The pragma comment(lib, ...) directives in the .cpp files handle linking.
-
     target_compile_options(desktop_temp_notif PRIVATE /utf-8)
     target_compile_definitions(desktop_temp_notif PRIVATE
         UNICODE _UNICODE
-        _WIN32_WINNT=0x0A00   # Windows 10
+        _WIN32_WINNT=0x0A00   # Windows 10/11
         WINVER=0x0A00
     )
 
-    # Link WinHTTP (sensor reader) + WinRT + shell + shortcut (notifier)
+    # WinHTTP (sensor reader) + WinRT + COM (compat library)
     target_link_libraries(desktop_temp_notif PRIVATE
         winhttp
         runtimeobject
-        shlwapi
         ole32
-        propsys
+        shlwapi
     )
 endif()

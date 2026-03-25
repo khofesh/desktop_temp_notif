@@ -8,6 +8,9 @@
 #elif _WIN32
 #include "windows_sensor_reader.hpp"
 #include "windows_notifier.hpp"
+#include "notification_activator.hpp"
+#include "DesktopNotificationManagerCompat.h"
+#include <wrl\wrappers\corewrappers.h>
 #endif
 
 #include <chrono>
@@ -21,26 +24,47 @@ static bool verbose = false;
 
 int main(int argc, char* argv[]) {
     // Usage: desktop_temp_notif [--verbose] [config_file]
-    Config cfg;
     std::string config_path;
-
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--verbose" || arg == "-v") {
+        if (arg == "--verbose" || arg == "-v")
             verbose = true;
-        } else {
+        else
             config_path = arg;
-        }
     }
 
-    cfg = config_path.empty() ? Config::default_config() : Config::load(config_path);
+    Config cfg = config_path.empty() ? Config::default_config() : Config::load(config_path);
 
 #ifdef __linux__
-    std::unique_ptr<SensorReader> reader = std::make_unique<LinuxSensorReader>();
+    std::unique_ptr<SensorReader> reader   = std::make_unique<LinuxSensorReader>();
     std::unique_ptr<Notifier>     notifier = std::make_unique<LinuxNotifier>();
+
 #elif _WIN32
-    std::unique_ptr<SensorReader> reader = std::make_unique<WindowsSensorReader>();
+    // WinRT must be initialised before any notification or compat-library calls.
+    Microsoft::WRL::Wrappers::RoInitializeWrapper winRtInit(RO_INIT_MULTITHREADED);
+    if (FAILED((HRESULT)winRtInit)) {
+        std::cerr << "RoInitialize failed\n";
+        return 1;
+    }
+
+    // Register our AUMID and the COM server (writes to HKCU registry).
+    HRESULT hr = DesktopNotificationManagerCompat::RegisterAumidAndComServer(
+        L"Khofesh.DesktopTempNotif", __uuidof(NotificationActivator));
+    if (FAILED(hr)) {
+        std::cerr << "RegisterAumidAndComServer failed (0x" << std::hex << hr << ")\n";
+        return 1;
+    }
+
+    // Register the COM activator so Action Centre can call back into this process.
+    hr = DesktopNotificationManagerCompat::RegisterActivator();
+    if (FAILED(hr)) {
+        std::cerr << "RegisterActivator failed (0x" << std::hex << hr << ")\n";
+        return 1;
+    }
+
+    std::unique_ptr<SensorReader> reader   = std::make_unique<WindowsSensorReader>();
     std::unique_ptr<Notifier>     notifier = std::make_unique<WindowsNotifier>();
+
 #else
     std::cerr << "Unsupported platform\n";
     return 1;

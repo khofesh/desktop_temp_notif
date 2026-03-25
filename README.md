@@ -60,6 +60,8 @@ The binary is at `build/desktop_temp_notif` (Linux) or `build\Release\desktop_te
 
 ## Run
 
+### Linux
+
 **Foreground:**
 ```bash
 ./build/desktop_temp_notif
@@ -75,6 +77,30 @@ The binary is at `build/desktop_temp_notif` (Linux) or `build\Release\desktop_te
 nohup ./build/desktop_temp_notif &
 ```
 
+### Windows
+
+**Foreground (Command Prompt or PowerShell):**
+```bat
+build\Release\desktop_temp_notif.exe
+```
+
+**With a custom config file:**
+```bat
+build\Release\desktop_temp_notif.exe C:\path\to\my.conf
+```
+
+**Background (start minimised, no console window):**
+```bat
+start /B build\Release\desktop_temp_notif.exe
+```
+
+**Run at startup via Task Scheduler (recommended for background use):**
+1. Open **Task Scheduler** → _Create Basic Task_
+2. Trigger: **At log on**
+3. Action: **Start a program** → point to `desktop_temp_notif.exe`
+4. Add config path as argument if needed
+5. In _Properties > General_ check **Run only when user is logged on**
+
 ---
 
 ## Configuration
@@ -89,19 +115,19 @@ poll_interval=30
 notification_cooldown=300
 
 # per-sensor thresholds (°C)
-SYSTIN.warning=50
+SYSTIN.warning=70
 SYSTIN.critical=80
-CPUTIN.warning=50
+CPUTIN.warning=75
 CPUTIN.critical=80
-Tctl.warning=50
+Tctl.warning=85
 Tctl.critical=95
-Tccd1.warning=50
+Tccd1.warning=85
 Tccd1.critical=95
-Tccd2.warning=50
+Tccd2.warning=85
 Tccd2.critical=95
-SMBUSMASTER 0.warning=50
+SMBUSMASTER 0.warning=75
 SMBUSMASTER 0.critical=80
-temp1.warning=60
+temp1.warning=100
 temp1.critical=115
 ```
 
@@ -109,10 +135,10 @@ temp1.critical=115
 
 | Sensor        | Warning (°C) | Critical (°C) |
 |---------------|-------------|---------------|
-| SYSTIN        | 50          | 80            |
-| CPUTIN        | 50          | 80            |
-| SMBUSMASTER 0 | 50          | 80            |
-| Tctl          | 50          | 95            |
-| Tccd1         | 50          | 95            |
-| Tccd2         | 50          | 95            |
-| temp1         | 60          | 115           |
+| SYSTIN        | 70          | 80            |
+| CPUTIN        | 75          | 80            |
+| SMBUSMASTER 0 | 75          | 80            |
+| Tctl          | 85          | 95            |
+| Tccd1         | 85          | 95            |
+| Tccd2         | 85          | 95            |
+| temp1         | 100         | 115           |

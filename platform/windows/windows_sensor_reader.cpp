@@ -62,6 +62,29 @@ class JsonParser {
                     case 'n':  r += '\n'; break;
                     case 'r':  r += '\r'; break;
                     case 't':  r += '\t'; break;
+                    case 'u': {
+                        // Decode \uXXXX into UTF-8 bytes
+                        unsigned codepoint = 0;
+                        for (int i = 0; i < 4 && p_ + 1 < end_; ++i) {
+                            ++p_;
+                            unsigned char h = static_cast<unsigned char>(*p_);
+                            if      (h >= '0' && h <= '9') codepoint = codepoint * 16 + (h - '0');
+                            else if (h >= 'a' && h <= 'f') codepoint = codepoint * 16 + (h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') codepoint = codepoint * 16 + (h - 'A' + 10);
+                        }
+                        // Encode as UTF-8
+                        if (codepoint < 0x80) {
+                            r += static_cast<char>(codepoint);
+                        } else if (codepoint < 0x800) {
+                            r += static_cast<char>(0xC0 | (codepoint >> 6));
+                            r += static_cast<char>(0x80 | (codepoint & 0x3F));
+                        } else {
+                            r += static_cast<char>(0xE0 | (codepoint >> 12));
+                            r += static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+                            r += static_cast<char>(0x80 | (codepoint & 0x3F));
+                        }
+                        break;
+                    }
                     default:   r += *p_;  break;
                 }
             } else {

@@ -36,3 +36,6 @@ desktop_temp_notif
 
 # LHM sample data (local only)
 data.json
+
+# Personal config overrides (keep only the sample *.conf files)
+config.local.conf

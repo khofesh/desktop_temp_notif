@@ -8,6 +8,17 @@ if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBNOTIFY libnotify)
 
+    # Detect libsensors (lm_sensors C API)
+    find_path(LIBSENSORS_INCLUDE_DIR sensors/sensors.h)
+    find_library(LIBSENSORS_LIBRARY NAMES sensors)
+    if(LIBSENSORS_INCLUDE_DIR AND LIBSENSORS_LIBRARY)
+        set(LIBSENSORS_FOUND TRUE)
+        message(STATUS "libsensors found — using C API for sensor reading")
+    else()
+        set(LIBSENSORS_FOUND FALSE)
+        message(STATUS "libsensors not found — using popen(sensors) fallback")
+    endif()
+
     set(SOURCES
         src/main.cpp
         src/config.cpp
@@ -26,6 +37,12 @@ if(UNIX AND NOT APPLE)
         target_compile_options(desktop_temp_notif PRIVATE ${LIBNOTIFY_CFLAGS_OTHER})
     else()
         message(STATUS "libnotify not found — using notify-send fallback")
+    endif()
+
+    if(LIBSENSORS_FOUND)
+        target_compile_definitions(desktop_temp_notif PRIVATE USE_LIBSENSORS)
+        target_include_directories(desktop_temp_notif PRIVATE ${LIBSENSORS_INCLUDE_DIR})
+        target_link_libraries(desktop_temp_notif PRIVATE ${LIBSENSORS_LIBRARY})
     endif()
 
 elseif(WIN32)

@@ -65,8 +65,8 @@ desktop_temp_notif/
     └── windows/
         ├── CSharp/                        # Windows C# project (active)
         │   ├── DesktopTempNotif.csproj    # net10.0-windows, LHM + Toast NuGet
-        │   ├── Program.cs                 # polling loop, CLI args, cooldown logic
-        │   ├── SensorReader.cs            # LibreHardwareMonitorLib wrapper
+        │   ├── Program.cs                 # polling loop, CLI args, cooldown, --list-sensors
+        │   ├── SensorReader.cs            # LibreHardwareMonitorLib wrapper + ListAllTemperatures()
         │   ├── Notifier.cs                # Windows Toast notifications
         │   └── Config.cs                  # INI config parser + Windows defaults
         ├── windows_sensor_reader.hpp/.cpp # legacy C++: WinHTTP + custom JSON parser
@@ -95,7 +95,8 @@ SMBUSMASTER 0.critical=80
 ```
 
 Pass the config file path as the first CLI argument, or omit for built-in defaults.
-Verbose mode: `--verbose` (first arg) prints all readings and skip reasons.
+Verbose mode: `--verbose` (or `-v`) prints all readings and skip reasons.
+List sensors mode: `--list-sensors` dumps all detected temperature sensors to `sensors_dump.txt` and exits (no polling).
 
 ## Default Thresholds
 
@@ -115,10 +116,12 @@ Verbose mode: `--verbose` (first arg) prints all readings and skip reasons.
 
 | Sensor           | Warning (°C) | Critical (°C) |
 | ---------------- | ------------ | ------------- |
-| Core (Tctl/Tdie) | 85           | 95            |
-| DIMM #1          | 50           | 80            |
-| GPU VR SoC       | 80           | 100           |
-| Temperature      | 60           | 79            |
+| Core (Tctl/Tdie)      | 85           | 95            |
+| DIMM #1               | 50           | 80            |
+| GPU VR SoC            | 80           | 100           |
+| Composite Temperature | 60           | 79            |
+| Temperature #1        | 60           | 79            |
+| Temperature #2        | 60           | 79            |
 
 ## Sensor Data
 

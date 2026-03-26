@@ -12,17 +12,16 @@ Supported platforms: **Linux**, **Windows**
 ┌─────────────────────┐        ┌──────────────────┐        ┌─────────────────┐
 │   Sensor Reader     │──────▶ │   Main Loop       │──────▶ │    Notifier     │
 │                     │        │                   │        │                 │
-│ Linux:  lm-sensors  │        │ compare vs config │        │ Linux: notify-  │
-│ Windows: LHM HTTP   │        │ cooldown tracking │        │   send / notify │
-└─────────────────────┘        └──────────────────┘        │ Windows: WinRT  │
-                                                            │   Toast API     │
-                                                            └─────────────────┘
+│ Linux:  lm-sensors  │        │ compare vs config │        │ Linux: libnotify│
+│ Windows: LHM direct │        │ cooldown tracking │        │ Windows: Toast  │
+└─────────────────────┘        └──────────────────┘        └─────────────────┘
 ```
 
 - Polls sensors every `poll_interval` seconds (default: 30)
 - Fires a **Warning** notification when a sensor crosses its warning threshold
 - Fires a **Critical** notification when it crosses its critical threshold
 - Suppresses repeated notifications for the same sensor/level within `notification_cooldown` seconds (default: 300)
+- Escalation (Warning → Critical) always overrides the cooldown
 
 ---
 
@@ -45,17 +44,10 @@ A running desktop session with a notification daemon is required (GNOME, KDE, XF
 
 ### Windows
 
-Install [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor).
+- **Run as Administrator** — required for `LibreHardwareMonitorLib` to load its ring0 driver for direct hardware sensor access
+- **.NET runtime** — not required if using the self-contained release binary
 
-This app reads sensor data from LHM's built-in HTTP server (WMI is unreliable in recent LHM versions).
-
-Setup:
-1. **Run LHM as Administrator** — right-click → _Run as administrator_. Required for hardware access.
-2. **Options → Remote Web Server → Run** — starts the HTTP server at `http://localhost:8085`.
-3. Verify: open `http://localhost:8085/data.json` in a browser. You should see sensor data as JSON.
-4. Keep LHM running in the background while `desktop_temp_notif.exe` is active.
-
-On first run the app automatically registers itself as a COM server in the current user's registry so that Windows toast notifications work correctly.
+No separate LibreHardwareMonitor process or HTTP server is needed. The app reads sensors directly via the embedded library.
 
 ---
 
@@ -68,16 +60,32 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### Windows (MSVC)
+Optional dependencies (preferred paths):
+- `libnotify-dev` / `lm_sensors-devel` — enables native C API paths; falls back to `notify-send` and `popen("sensors")` if absent
+
+### Windows
+
+Requires [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bat
-cmake -B build -G "Visual Studio 17 2022"
-cmake --build build --config Release
+cd platform\windows\CSharp
+dotnet build
+```
+
+To produce a self-contained single `.exe` (no runtime install needed on target machine):
+
+```bat
+dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
 ```
 
 Binaries:
 - Linux: `build/desktop_temp_notif`
-- Windows: `build\Release\desktop_temp_notif.exe`
+- Windows (build): `platform\windows\CSharp\bin\Release\net10.0-windows10.0.19041.0\win-x64\DesktopTempNotif.exe`
+- Windows (publish): `platform\windows\CSharp\bin\Release\net10.0-windows10.0.19041.0\win-x64\publish\DesktopTempNotif.exe`
+
+### Pre-built releases
+
+Download ready-to-run binaries from the [Releases](../../releases) page — no build tools required.
 
 ---
 
@@ -92,7 +100,7 @@ Binaries:
 # With config file
 ./build/desktop_temp_notif config.linux.conf
 
-# Verbose — prints sensor readings each poll cycle
+# Verbose — prints all sensor readings each poll cycle
 ./build/desktop_temp_notif --verbose
 
 # Background (survives terminal close)
@@ -101,25 +109,27 @@ nohup ./build/desktop_temp_notif config.linux.conf &
 
 ### Windows
 
+Must be run as Administrator (required for hardware sensor access).
+
 ```bat
 REM Foreground
-build\Release\desktop_temp_notif.exe
+DesktopTempNotif.exe
 
 REM With config file
-build\Release\desktop_temp_notif.exe config.windows.conf
+DesktopTempNotif.exe config.windows.conf
 
 REM Verbose — prints sensor readings and threshold comparisons
-build\Release\desktop_temp_notif.exe --verbose config.windows.conf
+DesktopTempNotif.exe --verbose config.windows.conf
 
 REM Background (no console window)
-start /B build\Release\desktop_temp_notif.exe config.windows.conf
+start /B DesktopTempNotif.exe config.windows.conf
 ```
 
 **Run at startup via Task Scheduler (recommended):**
 1. Open **Task Scheduler** → _Create Basic Task_
 2. Trigger: **At log on**
-3. Action: **Start a program** → path to `desktop_temp_notif.exe`, argument: path to config file
-4. _Properties → General_ → **Run only when user is logged on**
+3. Action: **Start a program** → path to `DesktopTempNotif.exe`, argument: path to config file
+4. _Properties → General_ → **Run with highest privileges** (needed for ring0 driver)
 
 ---
 
@@ -128,14 +138,11 @@ start /B build\Release\desktop_temp_notif.exe config.windows.conf
 Pass `--verbose` (or `-v`) to print all sensor readings and threshold comparisons on each poll cycle. Useful for diagnosing sensor name mismatches or threshold issues.
 
 ```
---- sensor readings (6) ---
-  Core (Tctl/Tdie): 41.8 C
-  DIMM #1: 40.3 C
-  GPU VR SoC: 41.0 C
-  Composite Temperature: 36.0 C
-  Temperature #1: 35.9 C
-  Temperature #2: 36.9 C
-[WARNING] Core (Tctl/Tdie) 41.8 C (threshold: 20.0 C)
+[ok]   Core (Tctl/Tdie): 41.8°C (below warning 85.0°C)
+[ok]   DIMM #1: 40.3°C (below warning 50.0°C)
+[skip] GPU VR SoC: not found in sensor data
+[WARNING] Temperature: 62.5°C (threshold: 60.0°C)
+[poll] sleeping 30s...
 ```
 
 ---
@@ -167,7 +174,7 @@ Sample config files for each platform are included:
 
 **Linux** — run `sensors` and use the names exactly as shown (e.g. `SYSTIN`, `Tctl`, `temp1`).
 
-**Windows** — open `http://localhost:8085/data.json` in a browser while LHM is running, or use `--verbose` to see what names the app is reading.
+**Windows** — run `DesktopTempNotif.exe --verbose` to print all sensor names being read from hardware, then use those exact names in your config file.
 
 ### Default thresholds
 
@@ -185,14 +192,12 @@ Sample config files for each platform are included:
 
 **Windows** (LibreHardwareMonitor):
 
-| Sensor                | Warning (°C) | Critical (°C) |
-|-----------------------|-------------|---------------|
-| Core (Tctl/Tdie)      | 85          | 95            |
-| DIMM #1               | 50          | 80            |
-| GPU VR SoC            | 80          | 100           |
-| Composite Temperature | 60          | 79            |
-| Temperature #1        | 60          | 79            |
-| Temperature #2        | 60          | 79            |
+| Sensor           | Warning (°C) | Critical (°C) |
+|------------------|-------------|---------------|
+| Core (Tctl/Tdie) | 85          | 95            |
+| DIMM #1          | 50          | 80            |
+| GPU VR SoC       | 80          | 100           |
+| Temperature      | 60          | 79            |
 
 > Sensor names vary by hardware. Always verify with `sensors` (Linux) or `--verbose` (Windows).
 
@@ -202,19 +207,17 @@ Sample config files for each platform are included:
 
 ### No notifications appear (Windows)
 
-- Confirm LHM is running as Administrator with **Remote Web Server** enabled.
-- Run with `--verbose` to confirm sensors are being read and thresholds are crossed (look for `[WARNING]` or `[CRITICAL]` lines in the output).
-- Check Windows **Focus Assist** / **Do Not Disturb** settings — these can suppress toast notifications.
+- Confirm you are running as Administrator.
+- Run with `--verbose` and check for `[WARNING]` or `[CRITICAL]` lines — if they appear but no toast shows, check Windows **Focus Assist** / **Do Not Disturb** settings.
+- Verify the sensor names in your config match what `--verbose` reports.
 
-### Sensor readings (0) — Windows
+### No sensors read (Windows)
 
-The HTTP request to LHM failed. The console will print the specific error. Common causes:
-- LHM's web server is not enabled (**Options → Remote Web Server → Run**)
-- LHM is not running as Administrator
+If `--verbose` shows all sensors as `not found in sensor data`, the ring0 driver failed to load. Ensure the process has Administrator privileges.
 
 ### Sensor names not matching
 
-Sensor names differ by hardware and platform. Use `--verbose` to see the exact names being reported, then update your config file to match.
+Sensor names differ by hardware and driver version. Use `--verbose` to see exact names being reported, then update your config file to match.
 
 ### Linux: notifications not appearing
 

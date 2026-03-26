@@ -11,6 +11,7 @@
     <SelfContained>true</SelfContained>
     <AssemblyName>DesktopTempNotif</AssemblyName>
     <RootNamespace>DesktopTempNotif</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>

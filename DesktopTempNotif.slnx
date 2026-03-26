@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/platform/" />
+  <Folder Name="/platform/windows/" />
+  <Folder Name="/platform/windows/CSharp/">
+    <Project Path="platform/windows/CSharp/DesktopTempNotif.csproj" />
+  </Folder>
+</Solution>

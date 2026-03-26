@@ -174,7 +174,25 @@ Sample config files for each platform are included:
 
 **Linux** — run `sensors` and use the names exactly as shown (e.g. `SYSTIN`, `Tctl`, `temp1`).
 
-**Windows** — run `DesktopTempNotif.exe --verbose` to print all sensor names being read from hardware, then use those exact names in your config file.
+**Windows** — run `DesktopTempNotif.exe --list-sensors` (as Administrator) to dump all detected temperature sensors and their exact names to `sensors_dump.txt`. Use those names in your config file.
+
+```
+DesktopTempNotif.exe --list-sensors
+```
+
+Example output:
+```
+# Hardware                                  Type            Sensor Name                         Temp (°C)
+# ---------------------------------------- --------------- ----------------------------------- ---------
+  AMD Ryzen 7 PRO 8840U ...                 Cpu             Core (Tctl/Tdie)                    44.3
+  SK Hynix - HMCG88AGBSA095N (#1)          Memory          DIMM #1                             42.0
+  AMD Radeon 780M Graphics                  GpuAmd          GPU VR SoC                          44.0
+  UMIS RPETJ1T24MKP2QDQ                    Storage         Composite Temperature               36.0
+  UMIS RPETJ1T24MKP2QDQ                    Storage         Temperature #1                      35.9
+  UMIS RPETJ1T24MKP2QDQ                    Storage         Temperature #2                      37.9
+```
+
+> Note: LHM may expose NVMe drive metadata (e.g. `Warning Temperature`, `Thermal Sensor High Limit`) as temperature-type sensors. These are drive limits, not actual readings — ignore them.
 
 ### Default thresholds
 
@@ -194,10 +212,12 @@ Sample config files for each platform are included:
 
 | Sensor           | Warning (°C) | Critical (°C) |
 |------------------|-------------|---------------|
-| Core (Tctl/Tdie) | 85          | 95            |
-| DIMM #1          | 50          | 80            |
-| GPU VR SoC       | 80          | 100           |
-| Temperature      | 60          | 79            |
+| Core (Tctl/Tdie)      | 85          | 95            |
+| DIMM #1               | 50          | 80            |
+| GPU VR SoC            | 80          | 100           |
+| Composite Temperature | 60          | 79            |
+| Temperature #1        | 60          | 79            |
+| Temperature #2        | 60          | 79            |
 
 > Sensor names vary by hardware. Always verify with `sensors` (Linux) or `--verbose` (Windows).
 
@@ -209,7 +229,7 @@ Sample config files for each platform are included:
 
 - Confirm you are running as Administrator.
 - Run with `--verbose` and check for `[WARNING]` or `[CRITICAL]` lines — if they appear but no toast shows, check Windows **Focus Assist** / **Do Not Disturb** settings.
-- Verify the sensor names in your config match what `--verbose` reports.
+- Verify the sensor names in your config match what `--list-sensors` reports.
 
 ### No sensors read (Windows)
 

@@ -11,11 +11,12 @@ class Config
     public static Config LoadDefaults()
     {
         var cfg = new Config();
-        cfg.Thresholds["Core (Tctl/Tdie)"] = new Threshold(85, 95);
-        cfg.Thresholds["DIMM #1"] = new Threshold(50, 80);
-        cfg.Thresholds["GPU VR SoC"] = new Threshold(80, 100);
-        cfg.Thresholds["Temperature #1"] = new Threshold(60, 79);
-        cfg.Thresholds["Temperature #2"] = new Threshold(60, 79);
+        cfg.Thresholds["Core (Tctl/Tdie)"]      = new Threshold(85, 95);
+        cfg.Thresholds["DIMM #1"]               = new Threshold(50, 80);
+        cfg.Thresholds["GPU VR SoC"]            = new Threshold(80, 100);
+        cfg.Thresholds["Composite Temperature"] = new Threshold(60, 79);
+        cfg.Thresholds["Temperature #1"]        = new Threshold(60, 79);
+        cfg.Thresholds["Temperature #2"]        = new Threshold(60, 79);
         return cfg;
     }
 

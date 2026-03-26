@@ -19,15 +19,6 @@ foreach (var arg in args)
         cfgPath = arg;
 }
 
-var config  = cfgPath is not null ? Config.Load(cfgPath) : Config.LoadDefaults();
-var notifier = new Notifier();
-
-// Per-sensor cooldown tracking: sensor name → (last level, last notification time)
-var lastNotif = new Dictionary<string, (NotificationLevel Level, DateTime Time)>();
-
-Console.WriteLine("[desktop_temp_notif] Starting. Poll interval: " +
-    $"{config.PollIntervalSeconds}s, cooldown: {config.NotificationCooldownSeconds}s");
-
 using var reader = new SensorReader();
 
 if (listSensors)
@@ -54,6 +45,15 @@ if (listSensors)
     Console.WriteLine($"Saved to: {Path.GetFullPath(dumpPath)}");
     return;
 }
+
+var config   = cfgPath is not null ? Config.Load(cfgPath) : Config.LoadDefaults();
+var notifier = new Notifier();
+
+// Per-sensor cooldown tracking: sensor name → (last level, last notification time)
+var lastNotif = new Dictionary<string, (NotificationLevel Level, DateTime Time)>();
+
+Console.WriteLine("[desktop_temp_notif] Starting. Poll interval: " +
+    $"{config.PollIntervalSeconds}s, cooldown: {config.NotificationCooldownSeconds}s");
 
 while (true)
 {

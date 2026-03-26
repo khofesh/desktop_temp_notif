@@ -12,7 +12,7 @@ Monitor hardware temperatures and send desktop notifications when temperatures e
 - **Build system**: CMake 3.16+
 - **Linux notifications**: `libnotify` C API (preferred) with `notify-send` fork/exec fallback
 - **Windows notifications**: Windows Toast Notifications (WinRT) via `DesktopNotificationManagerCompat`
-- **Linux sensor reading**: Parse stdout of `sensors` (lm-sensors package) with regex
+- **Linux sensor reading**: `libsensors` C API (preferred) with `popen("sensors")` + regex fallback
 - **Windows sensor reading**: LibreHardwareMonitor HTTP API (`http://localhost:8085/data.json`) via WinHTTP
 
 ## Build
@@ -30,7 +30,9 @@ cmake --build build --config Release
 ### Linux Build Notes
 
 - Detects `libnotify` via PkgConfig; compiles with `-DUSE_LIBNOTIFY` if found, otherwise falls back to `notify-send`
-- Requires `lm-sensors` package installed and `sensors` binary in PATH
+- Detects `libsensors` via `find_path`/`find_library`; compiles with `-DUSE_LIBSENSORS` if found, otherwise falls back to `popen("sensors")` + regex
+- Install `lm_sensors-devel` (Fedora) or `libsensors-dev` (Debian/Ubuntu) for the preferred libsensors C API path
+- Requires `lm-sensors` package installed; `sensors` binary in PATH only needed for the fallback path
 
 ### Windows Build Notes
 
@@ -56,7 +58,7 @@ desktop_temp_notif/
 │   └── config.cpp                         # config loading (file + defaults)
 └── platform/
     ├── linux/
-    │   ├── linux_sensor_reader.hpp/.cpp   # pipes `sensors`, regex parsing
+    │   ├── linux_sensor_reader.hpp/.cpp   # libsensors C API or popen(`sensors`) fallback
     │   └── linux_notifier.hpp/.cpp        # libnotify or notify-send fallback
     └── windows/
         ├── windows_sensor_reader.hpp/.cpp # WinHTTP + custom JSON parser

@@ -1,6 +1,62 @@
 #include "linux_sensor_reader.hpp"
-#include <cstdio>
 #include <iostream>
+
+#ifdef USE_LIBSENSORS
+
+#include <cstdlib>
+#include <sensors/sensors.h>
+
+LinuxSensorReader::LinuxSensorReader() {
+    if (sensors_init(NULL) != 0) {
+        std::cerr << "Error: sensors_init() failed\n";
+        initialized_ = false;
+    } else {
+        initialized_ = true;
+    }
+}
+
+LinuxSensorReader::~LinuxSensorReader() {
+    if (initialized_) {
+        sensors_cleanup();
+    }
+}
+
+std::map<std::string, float> LinuxSensorReader::read() {
+    std::map<std::string, float> result;
+    if (!initialized_) return result;
+
+    const sensors_chip_name* chip;
+    int chip_nr = 0;
+
+    while ((chip = sensors_get_detected_chips(NULL, &chip_nr)) != NULL) {
+        const sensors_feature* feature;
+        int feat_nr = 0;
+
+        while ((feature = sensors_get_features(chip, &feat_nr)) != NULL) {
+            if (feature->type != SENSORS_FEATURE_TEMP) continue;
+
+            const sensors_subfeature* sub =
+                sensors_get_subfeature(chip, feature,
+                                       SENSORS_SUBFEATURE_TEMP_INPUT);
+            if (!sub) continue;
+
+            double value;
+            if (sensors_get_value(chip, sub->number, &value) != 0) continue;
+
+            char* label = sensors_get_label(chip, feature);
+            if (!label) continue;
+
+            result[std::string(label)] = static_cast<float>(value);
+            free(label);
+        }
+    }
+
+    return result;
+}
+
+#else // USE_LIBSENSORS — fall back to popen("sensors") + regex parsing
+
+#include <cstdio>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -44,3 +100,5 @@ std::map<std::string, float> LinuxSensorReader::read() {
 
     return result;
 }
+
+#endif // USE_LIBSENSORS

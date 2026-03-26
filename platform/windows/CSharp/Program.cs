@@ -1,12 +1,20 @@
+using System.Globalization;
 using DesktopTempNotif;
 
-bool verbose    = false;
-string? cfgPath = null;
+// Always use invariant culture so decimal separator is '.' regardless of system locale
+CultureInfo.DefaultThreadCurrentCulture   = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+
+bool verbose     = false;
+bool listSensors = false;
+string? cfgPath  = null;
 
 foreach (var arg in args)
 {
     if (arg == "--verbose" || arg == "-v")
         verbose = true;
+    else if (arg == "--list-sensors")
+        listSensors = true;
     else
         cfgPath = arg;
 }
@@ -21,6 +29,31 @@ Console.WriteLine("[desktop_temp_notif] Starting. Poll interval: " +
     $"{config.PollIntervalSeconds}s, cooldown: {config.NotificationCooldownSeconds}s");
 
 using var reader = new SensorReader();
+
+if (listSensors)
+{
+    var sensors  = reader.ListAllTemperatures();
+    var dumpPath = "sensors_dump.txt";
+    var lines    = new List<string>
+    {
+        $"# Temperature sensors — {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+        $"# Total: {sensors.Count}",
+        "#",
+        $"# {"Hardware",-40} {"Type",-15} {"Sensor Name",-35} Temp (°C)",
+        $"# {new string('-', 40)} {new string('-', 15)} {new string('-', 35)} ---------",
+    };
+    foreach (var s in sensors)
+        lines.Add($"  {s.HardwareName,-40} {s.HardwareType,-15} {s.SensorName,-35} {s.Value:F1}");
+
+    File.WriteAllLines(dumpPath, lines);
+
+    foreach (var line in lines)
+        Console.WriteLine(line);
+
+    Console.WriteLine();
+    Console.WriteLine($"Saved to: {Path.GetFullPath(dumpPath)}");
+    return;
+}
 
 while (true)
 {

@@ -20,6 +20,8 @@ class UpdateVisitor : IVisitor
     public void VisitParameter(IParameter parameter) { }
 }
 
+record SensorInfo(string HardwareName, string HardwareType, string SensorName, float Value);
+
 class SensorReader : IDisposable
 {
     private readonly Computer _computer;
@@ -29,10 +31,11 @@ class SensorReader : IDisposable
     {
         _computer = new Computer
         {
-            IsCpuEnabled    = true,
-            IsGpuEnabled    = true,
-            IsMemoryEnabled = true,
+            IsCpuEnabled         = true,
+            IsGpuEnabled         = true,
+            IsMemoryEnabled      = true,
             IsMotherboardEnabled = true,
+            IsStorageEnabled     = true,
         };
         _computer.Open();
     }
@@ -47,6 +50,16 @@ class SensorReader : IDisposable
         return result;
     }
 
+    public List<SensorInfo> ListAllTemperatures()
+    {
+        _computer.Accept(_visitor);
+
+        var result = new List<SensorInfo>();
+        foreach (var hardware in _computer.Hardware)
+            CollectSensorInfo(hardware, result);
+        return result;
+    }
+
     private static void CollectTemperatures(IHardware hardware, Dictionary<string, float> result)
     {
         foreach (var sensor in hardware.Sensors)
@@ -56,6 +69,18 @@ class SensorReader : IDisposable
         }
         foreach (var sub in hardware.SubHardware)
             CollectTemperatures(sub, result);
+    }
+
+    private static void CollectSensorInfo(IHardware hardware, List<SensorInfo> result)
+    {
+        foreach (var sensor in hardware.Sensors)
+        {
+            if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue)
+                result.Add(new SensorInfo(hardware.Name, hardware.HardwareType.ToString(),
+                    sensor.Name, sensor.Value.Value));
+        }
+        foreach (var sub in hardware.SubHardware)
+            CollectSensorInfo(sub, result);
     }
 
     public void Dispose()
